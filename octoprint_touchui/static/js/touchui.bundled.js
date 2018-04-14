@@ -12,6 +12,7 @@ TouchUI.prototype = {
 	settings: {
 		id: "touch",
 		version: 0,
+		requiredBootloaderVersion: 1,
 
 		isFullscreen: ko.observable(false),
 		isTouchscreen: ko.observable(false),
@@ -365,6 +366,14 @@ TouchUI.prototype.components.keyboard = {
 	},
 
 	onShow: function(event, keyboard, el) {
+		// Set the input cursor to the end of the input field
+		setTimeout(function() {
+			var prev = keyboard.$preview.get(0);
+			if (prev) {
+				prev.selectionStart = prev.selectionEnd = prev.value.length;
+			}
+		}, 10);
+		
 		keyboard.$keyboard.find("button").on("mousedown", function(e) {
 			$(e.target).addClass("touch-focus");
 
@@ -586,6 +595,7 @@ TouchUI.prototype.components.touchscreen = {
 		}
 		
 		$('.modal.fade').removeClass('fade');
+		$('#gcode_link').remove();
 
 		// Improve performace
 		this.scroll.defaults.iScroll.scrollbars = false;
@@ -605,11 +615,11 @@ TouchUI.prototype.components.touchscreen = {
 
 			// Disable GCodeViewer in touchscreen mode
 			if (viewModels.gcodeViewModel) {
-				console.info("TouchUI: Disabling GCodeViewer in touchscreen mode...");
+				console.info("TouchUI: GCodeViewer is disabled while TouchUI is active and in touchscreen mode.");
 				viewModels.gcodeViewModel.enabled = false;
 				viewModels.gcodeViewModel.initialize = _.noop;
+				viewModels.gcodeViewModel.clear = _.noop;
 				viewModels.gcodeViewModel._processData = _.noop;
-				$("#gcode_link2").hide();
 			}
 		}
 
@@ -649,7 +659,7 @@ TouchUI.prototype.core.init = function() {
 
 		// Create keyboard cookie if not existing
 		if (this.DOM.storage.get("keyboardActive") === undefined) {
-			if (!this.settings.hasTouch) {
+			if (!this.settings.hasTouch || this.settings.isChromiumArm) {
 				this.DOM.storage.set("keyboardActive", true);
 			} else {
 				this.DOM.storage.set("keyboardActive", false);
@@ -662,8 +672,22 @@ TouchUI.prototype.core.init = function() {
 		}
 
 		// Treat KWEB3 as a special Touchscreen mode or enabled by cookie
-		if ((this.settings.isEpiphanyOrKweb || this.settings.isChromiumArm && this.DOM.storage.get("touchscreenActive") === undefined) || this.DOM.storage.get("touchscreenActive")) {
+		if (
+			(
+				this.settings.isEpiphanyOrKweb || 
+				this.settings.isChromiumArm && 
+				this.DOM.storage.get("touchscreenActive") === undefined
+			) || 
+			this.DOM.storage.get("touchscreenActive")
+		) {
 			this.components.touchscreen.init.call(this);
+		}
+
+		// If TouchUI has been started through bootloader then initialize the process during reloads
+		if (this.settings.isChromiumArm && window.top.postMessage) {
+			window.onbeforeunload = function(event) {
+				window.top.postMessage("reset", "*");
+			};
 		}
 
 		// Get state of cookies and store them in KO
@@ -680,7 +704,8 @@ TouchUI.prototype.core.boot = function() {
 	if(
 		document.location.hash === "#touch" ||
 		document.location.href.indexOf("?touch") > 0 ||
-		this.DOM.storage.get("active")
+		this.DOM.storage.get("active") ||
+		this.settings.isChromiumArm
 	) {
 
 		return true;
@@ -732,6 +757,18 @@ TouchUI.prototype.core.bridge = function() {
 			if (self.isActive()) {
 				self.scroll.beforeLoad.call(self);
 				self.DOM.init.call(self);
+
+				if (moment && moment.locale) {
+					// Overwrite the 'moment.locale' fuction and call original:
+					// The purpose is that we want to remove data before
+					// registering it to OctoPrint. Moment.locale is called
+					// just before this happens.
+					var old = moment.locale;
+					moment.locale = function() {
+						self.plugins.tempsGraph.call(self);
+						old.apply(moment, arguments);
+					};
+				}
 			}
 		},
 
@@ -750,7 +787,6 @@ TouchUI.prototype.core.bridge = function() {
 				self.components.slider.init.call(self);
 
 				self.scroll.init.call(self);
-				self.plugins.tempsGraph.call(self);
 			}
 		},
 
@@ -773,6 +809,7 @@ TouchUI.prototype.core.less = {
 			variables:	"@main-color: {mainColor}; \n" +
 						"@terminal-color: {termColor}; \n" +
 						"@text-color: {textColor}; \n" +
+						"@main-font-size: {fontSize}px; \n" +
 						"@main-background: {bgColor}; \n\n"
 		},
 		API: "./plugin/touchui/css"
@@ -804,6 +841,7 @@ TouchUI.prototype.core.less = {
 						.replace("{termColor}", self.settings.colors.termColor())
 						.replace("{textColor}", self.settings.colors.textColor())
 						.replace("{bgColor}", self.settings.colors.bgColor())
+						.replace("{fontSize}", self.settings.colors.fontSize())
 				);
 
 			}
@@ -817,14 +855,14 @@ TouchUI.prototype.core.less = {
 				if (error) {
 					self.core.less.error.call(self, error);
 				} else {
+					result.css = result.css.replace(/mixin\:placeholder\;/g, '');
 
 					$.post(self.core.less.options.API, {
 							css: result.css
 						})
 						.done(function() {
-							if (self.settings.requireNewCSS()) {
-								self.settings.refreshCSS("fast");
-							}
+							self.settings.refreshCSS(true);
+							$(window).trigger('resize');
 						})
 						.error(function(error) {
 							self.core.less.error.call(self, error);
@@ -878,7 +916,7 @@ TouchUI.prototype.core.version = {
 
 			softwareUpdateViewModel.versions.items.subscribe(function(changes) {
 
-				touchui = softwareUpdateViewModel.versions.getItem(function(elm) {
+				var touchui = softwareUpdateViewModel.versions.getItem(function(elm) {
 					return (elm.key === "touchui");
 				}, true) || false;
 
@@ -913,10 +951,15 @@ TouchUI.prototype.DOM.init = function() {
 	// Create a new persistent dropdown
 	this.DOM.create.dropdown.init.call( this.DOM.create.dropdown );
 
+	// Add a webcam tab if it's defined
+	if ($("#webcam_container").length > 0) {
+		this.DOM.create.webcam.init(this.DOM.create.tabbar);
+	}
+
 	// Move all other items from tabbar into dropdown
-	this.DOM.move.tabbar.init.call(this);
 	this.DOM.move.navbar.init.call(this);
-	this.DOM.move.afterTabAndNav.call(this );
+	this.DOM.move.tabbar.init.call(this);
+	this.DOM.move.afterTabAndNav.call(this);
 	this.DOM.move.overlays.init.call(this);
 	this.DOM.move.terminal.init.call(this);
 
@@ -927,13 +970,9 @@ TouchUI.prototype.DOM.init = function() {
 	this.DOM.move.controls.init();
 
 	// Disable these bootstrap/jquery plugins
-	this.DOM.overwrite.tabdrop.call(self);
-	this.DOM.overwrite.modal.call(self);
-
-	// Add a webcam tab if it's defined
-	if ($("#webcam_container").length > 0) {
-		this.DOM.create.webcam.init(this.DOM.create.tabbar);
-	}
+	this.DOM.overwrite.tabdrop.call(this);
+	this.DOM.overwrite.modal.call(this);
+	this.DOM.overwrite.pnotify.call(this);
 
 	// Add class with how many tab-items
 	$("#tabs, #navbar").addClass("items-" + $("#tabs li:not(.hidden_touch)").length);
@@ -1136,13 +1175,16 @@ TouchUI.prototype.knockout.isLoading = function (viewModels) {
 		self.components.touchscreen.isLoading.call(self, viewModels);
 
 		// Reload dimensions of webcam with onload event
+		// Legacy code from 1.3.3
 		// Fixes bug #78
-		$("#webcam_image").on("load", function() {
-			viewModels.controlViewModel.updateRotatorWidth();
-		});
+		if(viewModels.controlViewModel && viewModels.controlViewModel.updateRotatorWidth) {
+			$("#webcam_image").on("load", function() {
+				viewModels.controlViewModel.updateRotatorWidth();
+			});
+		}
 
 		// Prevent user from double clicking in a short period on buttons
-		$(document).on("click", "button:not(#login_button, .box, .distance, .dropdown-toggle)", function(e) {
+		$(document).on("click", "button:not(#login_button, .box, .distance, .dropdown-toggle, .btn-input-inc, .btn-input-dec, .temperature_target .btn-group button)", function(e) {
 			var printer = $(e.target);
 			printer.prop('disabled', true);
 
@@ -1211,9 +1253,12 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 		});
 
 		// Remove drag files into website feature
+		$(document).off("drag");
 		$(document).off("dragover");
-		if(viewModels.gcodeFilesViewModel._enableDragNDrop) {
+		if(viewModels.gcodeFilesViewModel && viewModels.gcodeFilesViewModel._enableDragNDrop) {
+			viewModels.gcodeFilesViewModel._enableDragNDrop(false);
 			viewModels.gcodeFilesViewModel._enableDragNDrop = function() {};
+			viewModels.gcodeFilesViewModel._forceEndDragNDrop = function() {};
 		}
 
 		// Hide the dropdown after login
@@ -1253,20 +1298,13 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 				ko.applyBindings(viewModels.navigationViewModel, $("#navbar_login")[0]);
 			} catch(err) {}
 
-			// Force the dropdown to appear open when logedIn
 			viewModels.navigationViewModel.loginState.loggedIn.subscribe(function(loggedIn) {
 				if( loggedIn ) {
-					$('#navbar_login a.dropdown-toggle').addClass("hidden_touch");
-					$('#login_dropdown_loggedin').removeClass('hide dropdown open').addClass('visible_touch');
-					
 					if (self.DOM.cookies.get("remember_token", true)) {
 						localStorage["remember_token"] = self.DOM.cookies.get("remember_token", true);
 					}
 					
 				} else {
-					$('#navbar_login a.dropdown-toggle').removeClass("hidden_touch");
-					$('#login_dropdown_loggedin').removeClass('visible_touch');
-					
 					if (localStorage["remember_token"]) {
 						delete localStorage["remember_token"];
 					}
@@ -1326,44 +1364,48 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 				$css.attr("href", refreshUrl(href));
 			}
 		});
-	}
 
-	// Check if we need to update an old LESS file with a new LESS one
-	var requireNewCSS = ko.computed(function() {
-		return self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin();
-	});
-	requireNewCSS.subscribe(function(requireNewCSS) {
-		if(requireNewCSS) {
-			setTimeout(function() {
-				self.core.less.save.call(self, self);
-			}, 100);
+		// Check if we need to update an old LESS file with a new LESS one
+		var requireNewCSS = ko.computed(function() {
+			return self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin();
+		});
+		requireNewCSS.subscribe(function(requireNewCSS) {
+			if(requireNewCSS) {
+				setTimeout(function() {
+					self.core.less.save.call(self, self);
+				}, 100);
+			}
+		});
+		
+		// Evuluate computed subscriber defined above:
+		// In OctoPrint >1.3.5 the settings will be defined upfront
+		requireNewCSS.notifySubscribers(self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin());
+		
+		//TODO: move this
+		$("li.dropdown#navbar_login > a.dropdown-toggle").off("click").on("click", function(e) {
+			e.stopImmediatePropagation();
+			e.preventDefault();
+
+			$(this).parent().toggleClass("open");
+		});
+		
+		if (window.top.postMessage) {
+			// Tell bootloader we're ready with giving him the expected version for the bootloader
+			// if version is lower on the bootloader, then the bootloader will throw an update msg
+			window.top.postMessage(self.settings.requiredBootloaderVersion, "*");
+			
+			// Sync customization with bootloader
+			window.top.postMessage([true, $("#navbar").css("background-color"), $("body").css("background-color")], "*");
+			
+			// Stop watching for errors
+			$(window).off("error.touchui");
+			
+			// Trigger wake-up for iScroll
+			if(window.dispatchEvent) {
+				window.dispatchEvent(new Event('resize'));
+			}
 		}
-	});
-	
-	$("li.dropdown#navbar_login > a.dropdown-toggle").off("click").on("click", function(e) {
-		e.stopImmediatePropagation();
-		e.preventDefault();
-
-		$(this).parent().toggleClass("open");
-	});
-	
-	if (window.top.postMessage) {
-		// Tell bootloader we're ready with giving him the expected version for the bootloader
-		// if version is lower on the bootloader, then the bootloader will throw an update msg
-		window.top.postMessage(1, "*");
-		
-		// Sync customization with bootloader
-		window.top.postMessage([true, $("#navbar").css("background-color"), $("body").css("background-color")], "*");
-		
-		// Stop watching for errors
-		$(window).off("error.touchui");
-		
-		// Trigger wake-up for iScroll
-		if(window.dispatchEvent) {
-			window.dispatchEvent(new Event('resize'));
-		}
 	}
-
 }
 
 TouchUI.prototype.knockout.viewModel = function() {
@@ -1416,21 +1458,14 @@ TouchUI.prototype.plugins.init = function (viewModels) {
 	this.plugins.screenSquish(viewModels.pluginManagerViewModel);
 }
 
-TouchUI.prototype.plugins.navbarTemp = function() {
-
-	// Manually move navbar temp (hard move)
-	if( $("#navbar_plugin_navbartemp").length > 0 ) {
-		var navBarTmp = $("#navbar_plugin_navbartemp").appendTo(this.DOM.create.dropdown.container);
-		$('<li class="divider"></li>').insertBefore(navBarTmp);
-	}
-
-}
+TouchUI.prototype.plugins.navbarTemp = function() {}
 
 TouchUI.prototype.plugins.psuControl = function() {
 
 	// Manually move navbar temp (hard move)
-	if( $("#navbar_plugin_psucontrol").length > 0 ) {
-		var navBarTmp = $("#navbar_plugin_psucontrol").appendTo(this.DOM.create.dropdown.container);
+	if( $("#navbar_plugin_psucontrol a").length > 0 ) {
+		$("#navbar_plugin_psucontrol a")
+			.text('PSU Control');
 	}
 
 }
@@ -1473,7 +1508,6 @@ TouchUI.prototype.plugins.screenSquish = function(pluginManagerViewModel) {
 };
 
 TouchUI.prototype.plugins.tempsGraph = function() {
-
 	_.remove(OCTOPRINT_VIEWMODELS, function(obj) {
 		if (obj[0] && obj[0].name === "TempsgraphViewModel") {
 			console.info("TouchUI: TempsGraph is disabled while TouchUI is active.");
@@ -1707,7 +1741,7 @@ TouchUI.prototype.scroll.overlay = {
 
 		self.scroll.iScrolls.overlay = [];
 
-		$items = $(this.scroll.overlay.mainItems);
+		var $items = $(this.scroll.overlay.mainItems);
 		$items.each(function(ind, elm) {
 			var child = $(elm).children("#" + $(elm).attr("id") + "_wrapper");
 			var div = $('<div></div>').prependTo(elm);
@@ -1878,7 +1912,7 @@ TouchUI.prototype.DOM.create.webcam = {
 
 	menu: {
 		webcam: {
-			cloneTo: "#term_link"
+			cloneTo: "#tabs #control_link"
 		}
 	},
 
@@ -1892,10 +1926,8 @@ TouchUI.prototype.DOM.create.webcam = {
 	},
 
 	init: function( tabbar ) {
-		var self = this;
-
 		this.container.$elm = $('<div id="webcam" class="tab-pane"></div>').appendTo(this.container.cloneTo);
-		this.menu.webcam.$elm = tabbar.createItem("webcam_link", "webcam", "tab").insertBefore(this.menu.webcam.cloneTo);
+		this.menu.webcam.$elm = tabbar.createItem("webcam_link", "webcam", "tab").insertAfter(this.menu.webcam.cloneTo).find('a').text('Webcam');
 
 		this.container.webcam.$container.next().appendTo(this.container.webcam.cloneTo);
 		this.container.webcam.$container.prependTo(this.container.webcam.cloneTo);
@@ -1904,7 +1936,9 @@ TouchUI.prototype.DOM.create.webcam = {
 		$('<!-- /ko -->').insertAfter(this.container.$elm);
 
 		$("#webcam_container").attr("data-bind", $("#webcam_container").attr("data-bind").replace("keydown: onKeyDown, ", ""));
-
+		$("#webcam_image").on("mousedown", function(e) {
+			e.preventDefault();
+		});
 	}
 
 }
@@ -1921,6 +1955,9 @@ TouchUI.prototype.DOM.move.afterTabAndNav = function() {
 	$('<li class="divider"></li>').insertBefore("#navbar_settings");
 	$('<li class="divider" id="divider_systemmenu" style="display: none;"></li>').insertBefore("#navbar_systemmenu").attr("data-bind", $("#navbar_systemmenu").attr("data-bind"));
 
+	if ($("#touchui_text_nonlink_container").length > 0) {
+		$('<li class="divider"></li>').insertBefore($("#touchui_text_nonlink_container").parent());
+	}
 }
 
 TouchUI.prototype.DOM.move.connection = {
@@ -1986,26 +2023,35 @@ TouchUI.prototype.DOM.move.controls = {
 }
 
 TouchUI.prototype.DOM.move.navbar = {
-	mainItems: ['#all_touchui_settings', '#navbar_plugin_navbartemp', '#navbar_login', /*'#navbar_systemmenu',*/ '.hidden_touch'],
+	mainItems: ['#all_touchui_settings', '#navbar_login', '.hidden_touch'],
 	init: function() {
 
-		$items = $("#navbar ul.nav > li:not("+this.DOM.move.navbar.mainItems+")");
-		$items.each(function(ind, elm) {
+		var $items = $("#navbar ul.nav > li:not("+this.DOM.move.navbar.mainItems+")");
+		var hasTextLinks = false;
+		$($items.get().reverse()).each(function(ind, elm) {
 			var $elm = $(elm);
-			$elm.appendTo(this.DOM.create.dropdown.container);
 
 			if($elm.children('a').length > 0) {
 				var elme = $elm.children('a')[0];
+
+				$elm.prependTo(this.DOM.create.dropdown.container);
 
 				$.each(elme.childNodes, function(key, node) {
 					if(node.nodeName === "#text") {
 						node.nodeValue = node.nodeValue.trim();
 					}
 				});
-				
+
 				if(!$(elme).text()) {
 					$(elme).text($(elme).attr("title"));
 				}
+			} else {
+				if(!hasTextLinks) {
+					hasTextLinks = true;
+					$('<li><ul id="touchui_text_nonlink_container"></ul></li>').appendTo(this.DOM.create.dropdown.container);
+				}
+
+				$elm.appendTo("#touchui_text_nonlink_container");
 			}
 		}.bind(this));
 
@@ -2014,12 +2060,36 @@ TouchUI.prototype.DOM.move.navbar = {
 
 		// Create and Move login form to main dropdown
 		$('<li><ul id="youcanhazlogin"></ul></li>').insertAfter("#navbar_plugin_touchui");
-		$('#navbar_login').appendTo('#youcanhazlogin').find('a.dropdown-toggle').text($('#youcanhazlogin').find('a.dropdown-toggle').text().trim());
+		
+		$('#navbar_login')
+			.appendTo('#youcanhazlogin')
+			.find('a.dropdown-toggle')
+			.text($('#youcanhazlogin').find('a.dropdown-toggle').text().trim())
+			.attr("data-bind", "visible: !loginState.loggedIn()");
 
+		// Create a fake dropdown link that will be overlapped by settings icon
+		$('<li id="touchui_dropdown_link"><a href="#"></a></li>').appendTo("#tabs");
+		
+		// Create fake TouchUI tabbar and map it to the original dropdown
+		function resizeMenuItem() {
+			var width = $('#print_link').width();
+			$('#all_touchui_settings').width(width);
+			
+			setTimeout(function() {
+				var width = $('#print_link').width();
+				$('#all_touchui_settings').width(width);
+			}, 100);
+
+			setTimeout(function() {
+				var width = $('#print_link').width();
+				$('#all_touchui_settings').width(width);
+			}, 600);
+		}
+		$(window).on('resize.touchui.navbar', resizeMenuItem);
+		resizeMenuItem();
+		
 		// Move the navbar temp plugin
-		this.plugins.navbarTemp.call(this);
 		this.plugins.psuControl.call(this);
-
 	}
 
 }
@@ -2039,28 +2109,58 @@ TouchUI.prototype.DOM.move.overlays = {
 }
 
 TouchUI.prototype.DOM.move.tabbar = {
-	mainItems: ['#print_link', '#temp_link', '#control_link', '#webcam_link', '#term_link', '.hidden_touch'],
 	init: function() {
+		//var howManyToSplice = ($("#webcam_container").length > 0) ? 3 : 4;
 
-		$items = $("#tabs > li:not("+this.DOM.move.tabbar.mainItems+")");
-		$items.each(function(ind, elm) {
+		var $items = $("#tabs > li:not(#print_link, #touchui_dropdown_link, .hidden_touch)");
+		$($items).each(function(ind, elm) {
 			var $elm = $(elm);
 
 			// Clone the items into the dropdown, and make it click the orginal link
-			$elm.clone().attr("id", $elm.attr("id")+"2").appendTo("#all_touchui_settings .dropdown-menu").find('a').off("click").on("click", function(e) {
-				$elm.find('a').click();
-				$("#all_touchui_settings").addClass("item_active");
-				e.preventDefault();
-				return false;
-			});
-			$elm.addClass("hidden_touch");
+			$elm
+				.clone()
+				.attr("id", $elm.attr("id")+"2")
+				.prependTo("#all_touchui_settings > .dropdown-menu")
+				.find("a")
+				.off("click")
+				.on("click", function(e) {
+					$elm.find('a').click();
+					$("#all_touchui_settings").addClass("item_active");
+					e.preventDefault();
+					return false;
+				});
 
+			$elm.addClass("hidden_touch");
 		}.bind(this));
 
 		$items = $("#tabs > li > a");
 		$items.each(function(ind, elm) {
 			$(elm).text("");
 		}.bind(this));
+		
+		var resize = function() {
+			var width = $('#print_link').width();
+			var winWidth = $(window).width();
+			var items = $('#tabs > li');
+			var itemsFit = Math.ceil(winWidth / width) - 3;
+
+			if (winWidth > (width * 2)) {
+				items.each(function(key, elm) {
+					if (key > itemsFit) {
+						$(elm).addClass('hidden_touch');
+						$('#' + $(elm).attr('id') + '2').removeClass('hidden_touch');
+					} else {
+						$(elm).removeClass('hidden_touch');
+						$('#' + $(elm).attr('id') + '2').addClass('hidden_touch');
+					}
+				});
+			}
+		}
+
+		$(window).on('resize.touchui.tabbar', resize);
+		$(window).on('resize.touchui.tabbar', _.debounce(resize, 200));
+		$(window).on('resize.touchui.tabbar', _.debounce(resize, 600));
+		resize();
 
 	}
 }
@@ -2100,6 +2200,16 @@ TouchUI.prototype.DOM.overwrite.modal = function() {
 	$.fn.modal.prototype = { constructor: $.fn.modal };
 	$.fn.modal.Constructor = $.fn.modal;
 	$.fn.modal.defaults = $.fn.modalBup.defaults;
+
+}
+
+TouchUI.prototype.DOM.overwrite.pnotify = function() {
+
+	if(!this.settings.hasTouch) {
+		var tmp = PNotify.prototype.options.stack;
+		tmp.context = $('#scroll .page-container');
+		PNotify.prototype.options.stack = tmp;
+	}
 
 }
 

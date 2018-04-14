@@ -7,10 +7,15 @@ TouchUI.prototype.DOM.init = function() {
 	// Create a new persistent dropdown
 	this.DOM.create.dropdown.init.call( this.DOM.create.dropdown );
 
+	// Add a webcam tab if it's defined
+	if ($("#webcam_container").length > 0) {
+		this.DOM.create.webcam.init(this.DOM.create.tabbar);
+	}
+
 	// Move all other items from tabbar into dropdown
-	this.DOM.move.tabbar.init.call(this);
 	this.DOM.move.navbar.init.call(this);
-	this.DOM.move.afterTabAndNav.call(this );
+	this.DOM.move.tabbar.init.call(this);
+	this.DOM.move.afterTabAndNav.call(this);
 	this.DOM.move.overlays.init.call(this);
 	this.DOM.move.terminal.init.call(this);
 
@@ -21,13 +26,9 @@ TouchUI.prototype.DOM.init = function() {
 	this.DOM.move.controls.init();
 
 	// Disable these bootstrap/jquery plugins
-	this.DOM.overwrite.tabdrop.call(self);
-	this.DOM.overwrite.modal.call(self);
-
-	// Add a webcam tab if it's defined
-	if ($("#webcam_container").length > 0) {
-		this.DOM.create.webcam.init(this.DOM.create.tabbar);
-	}
+	this.DOM.overwrite.tabdrop.call(this);
+	this.DOM.overwrite.modal.call(this);
+	this.DOM.overwrite.pnotify.call(this);
 
 	// Add class with how many tab-items
 	$("#tabs, #navbar").addClass("items-" + $("#tabs li:not(.hidden_touch)").length);

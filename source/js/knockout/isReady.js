@@ -21,9 +21,12 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 		});
 
 		// Remove drag files into website feature
+		$(document).off("drag");
 		$(document).off("dragover");
-		if(viewModels.gcodeFilesViewModel._enableDragNDrop) {
+		if(viewModels.gcodeFilesViewModel && viewModels.gcodeFilesViewModel._enableDragNDrop) {
+			viewModels.gcodeFilesViewModel._enableDragNDrop(false);
 			viewModels.gcodeFilesViewModel._enableDragNDrop = function() {};
+			viewModels.gcodeFilesViewModel._forceEndDragNDrop = function() {};
 		}
 
 		// Hide the dropdown after login
@@ -63,20 +66,13 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 				ko.applyBindings(viewModels.navigationViewModel, $("#navbar_login")[0]);
 			} catch(err) {}
 
-			// Force the dropdown to appear open when logedIn
 			viewModels.navigationViewModel.loginState.loggedIn.subscribe(function(loggedIn) {
 				if( loggedIn ) {
-					$('#navbar_login a.dropdown-toggle').addClass("hidden_touch");
-					$('#login_dropdown_loggedin').removeClass('hide dropdown open').addClass('visible_touch');
-					
 					if (self.DOM.cookies.get("remember_token", true)) {
 						localStorage["remember_token"] = self.DOM.cookies.get("remember_token", true);
 					}
 					
 				} else {
-					$('#navbar_login a.dropdown-toggle').removeClass("hidden_touch");
-					$('#login_dropdown_loggedin').removeClass('visible_touch');
-					
 					if (localStorage["remember_token"]) {
 						delete localStorage["remember_token"];
 					}
@@ -136,42 +132,46 @@ TouchUI.prototype.knockout.isReady = function (viewModels) {
 				$css.attr("href", refreshUrl(href));
 			}
 		});
-	}
 
-	// Check if we need to update an old LESS file with a new LESS one
-	var requireNewCSS = ko.computed(function() {
-		return self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin();
-	});
-	requireNewCSS.subscribe(function(requireNewCSS) {
-		if(requireNewCSS) {
-			setTimeout(function() {
-				self.core.less.save.call(self, self);
-			}, 100);
+		// Check if we need to update an old LESS file with a new LESS one
+		var requireNewCSS = ko.computed(function() {
+			return self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin();
+		});
+		requireNewCSS.subscribe(function(requireNewCSS) {
+			if(requireNewCSS) {
+				setTimeout(function() {
+					self.core.less.save.call(self, self);
+				}, 100);
+			}
+		});
+		
+		// Evuluate computed subscriber defined above:
+		// In OctoPrint >1.3.5 the settings will be defined upfront
+		requireNewCSS.notifySubscribers(self.settings.requireNewCSS() && viewModels.loginStateViewModel.isAdmin());
+		
+		//TODO: move this
+		$("li.dropdown#navbar_login > a.dropdown-toggle").off("click").on("click", function(e) {
+			e.stopImmediatePropagation();
+			e.preventDefault();
+
+			$(this).parent().toggleClass("open");
+		});
+		
+		if (window.top.postMessage) {
+			// Tell bootloader we're ready with giving him the expected version for the bootloader
+			// if version is lower on the bootloader, then the bootloader will throw an update msg
+			window.top.postMessage(self.settings.requiredBootloaderVersion, "*");
+			
+			// Sync customization with bootloader
+			window.top.postMessage([true, $("#navbar").css("background-color"), $("body").css("background-color")], "*");
+			
+			// Stop watching for errors
+			$(window).off("error.touchui");
+			
+			// Trigger wake-up for iScroll
+			if(window.dispatchEvent) {
+				window.dispatchEvent(new Event('resize'));
+			}
 		}
-	});
-	
-	$("li.dropdown#navbar_login > a.dropdown-toggle").off("click").on("click", function(e) {
-		e.stopImmediatePropagation();
-		e.preventDefault();
-
-		$(this).parent().toggleClass("open");
-	});
-	
-	if (window.top.postMessage) {
-		// Tell bootloader we're ready with giving him the expected version for the bootloader
-		// if version is lower on the bootloader, then the bootloader will throw an update msg
-		window.top.postMessage(1, "*");
-		
-		// Sync customization with bootloader
-		window.top.postMessage([true, $("#navbar").css("background-color"), $("body").css("background-color")], "*");
-		
-		// Stop watching for errors
-		$(window).off("error.touchui");
-		
-		// Trigger wake-up for iScroll
-		if(window.dispatchEvent) {
-			window.dispatchEvent(new Event('resize'));
-		}
 	}
-
 }

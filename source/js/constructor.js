@@ -12,6 +12,7 @@ TouchUI.prototype = {
 	settings: {
 		id: "touch",
 		version: 0,
+		requiredBootloaderVersion: 1,
 
 		isFullscreen: ko.observable(false),
 		isTouchscreen: ko.observable(false),

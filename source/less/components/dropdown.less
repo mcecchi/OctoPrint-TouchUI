@@ -71,18 +71,24 @@
 	}
 
 	li {
-		> p {
+		p {
+			.rem(font-size, 14);
+			.rem(line-height, 25);
+
+			float: none;
+			color: inherit;
+			margin: 0;
 			padding: 0 @dropdown-gutter;
 		}
 
 		a {
-			color: @dropdown-color-text !important;
-			font-size: 15px !important;
+			color: @dropdown-color-text;
+			.rem(font-size, 15) !important;
 			width: 100%;
 			.box-sizing(border-box);
 
 			padding: 0 @dropdown-gutter;
-			line-height: 40px;
+			.rem(line-height, 40);
 
 			i {
 				color: inherit;

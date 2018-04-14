@@ -2,7 +2,7 @@
 	.navbar-inner {
 
 		.container {
-			height: 66px;
+			.rem(height, 66);
 			border:0 none;
 
 			.nav {
@@ -21,6 +21,13 @@
 							> .dropdown-menu {
 								min-width: 230px;
 							}
+
+							#touchui_text_nonlink_container {
+								margin: 0;
+								list-style: none;
+								overflow: hidden;
+								padding: 5px 0;
+							}
 							
 							b.caret {
 								display: none;
@@ -29,20 +36,20 @@
 							&.item_active {
 								background: @main-background;
 
-								> a:after {
+								> a:before {
 									color: contrast(@main-background);
 								}
 							}
 
-							&.offline > a:after {
+							&.offline > a:before {
 								animation-name: blink_offline;
 							}
 
-							&.online > a:after {
+							&.online > a:before {
 								animation-name: blink_online;
 							}
 
-							> a:after {
+							> a:before {
 								animation-duration: 0.6s;
 								animation-iteration-count: 5;
 								content: "\f0c9";
@@ -84,15 +91,13 @@
 
 								&#timelapse_link2 {
 									a:before {
-										content: "\f03e";
-										font-size: 18px;
+										.rem(font-size, 18);
 									}
 								}
 
 								&#gcode_link2 {
 									a:before {
-										content: "\f248";
-										font-size: 17px;
+										.rem(font-size, 17);
 									}
 								}
 
@@ -126,7 +131,7 @@
 											position: absolute;
 											right: 20px;
 											margin: 0;
-											line-height: 40px;
+											.rem(line-height, 40);
 										}
 										&:before {
 											content: "\f023";
@@ -137,8 +142,8 @@
 								&#navbar_plugin_touchui {
 									a:before {
 										content: "\f10b";
-										font-size: 28px;
-										line-height: 28px;
+										.rem(font-size, 28);
+										.rem(line-height, 28);
 										position: relative;
 										top: 5px;
 										margin-top: -9px;
@@ -159,7 +164,7 @@
 
 										&:before {
 											content: "\f085";
-											font-size: 19px;
+											.rem(font-size, 19);
 										}
 										i {
 											display: none;
@@ -206,12 +211,12 @@
 
 									&:before {
 										.font-icon-reset();
-										content: "";
+										content: '\f128';
 										display: inline-block;
 										margin: 0 15px 0 0;
-										font-size: 20px;
+										.rem(font-size, 20);
+										.rem(width, 20);
 										position: relative;
-										width: 20px;
 										top: 2px;
 										text-align: center;
 									}
@@ -233,17 +238,20 @@
 						#navbar_login {
 							&.open {
 								#login_dropdown_loggedout {
-									padding: 5px @dropdown-gutter @dropdown-gutter;
+									padding: 5px @dropdown-gutter @dropdown-gutter !important;
+									display: block;
 								}
 							}
 						}
 
 						#login_dropdown_loggedout {
+							display: none;
 							border-top: 1px solid @dropdown-divider-color;
 							margin-top: 0;
 							padding: 0;
+							backface-visibility: hidden;
 
-							> * {
+							* {
 								.box-sizing(border-box);
 							}
 
@@ -255,6 +263,10 @@
 								padding-left: 0;
 								padding-right: 0;
 								text-indent: 12px;
+							}
+							
+							&.hide + #login_dropdown_loggedin {
+								display: block;
 							}
 						}
 					}

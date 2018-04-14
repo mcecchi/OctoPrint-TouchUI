@@ -7,6 +7,7 @@ TouchUI.prototype.core.less = {
 			variables:	"@main-color: {mainColor}; \n" +
 						"@terminal-color: {termColor}; \n" +
 						"@text-color: {textColor}; \n" +
+						"@main-font-size: {fontSize}px; \n" +
 						"@main-background: {bgColor}; \n\n"
 		},
 		API: "./plugin/touchui/css"
@@ -38,6 +39,7 @@ TouchUI.prototype.core.less = {
 						.replace("{termColor}", self.settings.colors.termColor())
 						.replace("{textColor}", self.settings.colors.textColor())
 						.replace("{bgColor}", self.settings.colors.bgColor())
+						.replace("{fontSize}", self.settings.colors.fontSize())
 				);
 
 			}
@@ -51,14 +53,14 @@ TouchUI.prototype.core.less = {
 				if (error) {
 					self.core.less.error.call(self, error);
 				} else {
+					result.css = result.css.replace(/mixin\:placeholder\;/g, '');
 
 					$.post(self.core.less.options.API, {
 							css: result.css
 						})
 						.done(function() {
-							if (self.settings.requireNewCSS()) {
-								self.settings.refreshCSS("fast");
-							}
+							self.settings.refreshCSS(true);
+							$(window).trigger('resize');
 						})
 						.error(function(error) {
 							self.core.less.error.call(self, error);

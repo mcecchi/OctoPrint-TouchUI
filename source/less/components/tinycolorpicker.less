@@ -1,15 +1,22 @@
 .colorPickers {
-	max-width: 340px;
+	.flex-display();
+	.flex-wrap(wrap);
+	max-width: 520px;
+
 	.controls {
-		float: left !important;
-		width: 150px !important;
-		margin: 0 20px 10px 0 !important;
+		.box-sizing();
+		.flex(1 1 50%);
+		max-width: 240px;
+		padding: 0 20px 20px 0;
 	}
 }
 .colorPicker {
 	position: relative;
 	clear: both;
 	display: inline-block;
+	max-width: 100%;
+	width: 100%;
+	
 	.track {
 		background: url("@{touchui-base-path}img/colorpicker.png") no-repeat center center;
 		height: 150px;

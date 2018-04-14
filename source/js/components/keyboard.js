@@ -143,6 +143,14 @@ TouchUI.prototype.components.keyboard = {
 	},
 
 	onShow: function(event, keyboard, el) {
+		// Set the input cursor to the end of the input field
+		setTimeout(function() {
+			var prev = keyboard.$preview.get(0);
+			if (prev) {
+				prev.selectionStart = prev.selectionEnd = prev.value.length;
+			}
+		}, 10);
+		
 		keyboard.$keyboard.find("button").on("mousedown", function(e) {
 			$(e.target).addClass("touch-focus");
 
